@@ -1,0 +1,78 @@
+name: Madesa Status Pipeline
+
+on:
+  schedule:
+    - cron: "30 9 * * *"   # 06:30 BRT (UTC-3)
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Create requirements
+        run: |
+          cat > requirements.txt << 'EOF'
+          google-api-python-client==2.138.0
+          google-auth==2.33.0
+          google-auth-httplib2==0.2.0
+          pandas==2.2.2
+          openpyxl==3.1.5
+          requests==2.32.3
+          urllib3==2.2.2
+          EOF
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Se usar base64 para as credenciais:
+      - name: Write Google credentials from base64
+        if: ${{ secrets.GSA_JSON_B64 != '' }}
+        run: |
+          mkdir -p "${{ github.workspace }}/secrets"
+          echo "${{ secrets.GSA_JSON_B64 }}" | base64 -d > "${{ github.workspace }}/secrets/gsa.json"
+
+      - name: Pre-run checks
+        run: |
+          if [ -n "${{ secrets.GSA_JSON_B64 }}" ]; then
+            test -s "${{ github.workspace }}/secrets/gsa.json" || (echo "ERRO: credenciais não criadas" && exit 1)
+            echo "Credenciais OK (arquivo)."
+          else
+            echo "Usando GOOGLE_CREDENTIALS_JSON inline (env)."
+          fi
+          ls -la data || true
+
+      - name: Run pipeline
+        env:
+          CF_EMAIL: ${{ secrets.CF_EMAIL }}
+          CF_SENHA: ${{ secrets.CF_SENHA }}
+          CF_IDCLIENTE: "206"
+          CF_IDPRODUTO: "1"
+          LOOKBACK_DIAS: "30"
+          # Google creds: use arquivo ou JSON inline
+          GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/secrets/gsa.json
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          OUTPUT_DIR: ${{ github.workspace }}/out_status
+          DEXPARA_XLSX_PATH: ${{ github.workspace }}/data/DExPARA.xlsx
+        run: |
+          python pipeline_cf_status.py --run --lookback "${LOOKBACK_DIAS}"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saida
+          if-no-files-found: ignore
+          path: |
+            out_status/ENTREGUES.csv
+            out_status/CANCELADOS.csv
+            out_status/DADOS CONFIRMADOS.csv
+            out_status/CONTATOS CONFIRMADOS.csv
+            out_status/ATUALIZACAO_DE_STATUS.xlsx
