@@ -1,6 +1,8 @@
 name: Madesa Status Pipeline
 
 on:
+  schedule:
+    - cron: "30 9 * * *"   # 06:30 BRT (UTC-3)
   workflow_dispatch: {}
 
 jobs:
@@ -29,7 +31,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Se usar base64 para as credenciais:
+      # Se usar base64 para as credenciais (recomendado):
       - name: Write Google credentials from base64
         if: ${{ secrets.GSA_JSON_B64 != '' }}
         run: |
@@ -53,7 +55,6 @@ jobs:
           CF_IDCLIENTE: "206"
           CF_IDPRODUTO: "1"
           LOOKBACK_DIAS: "30"
-          # Google creds: use arquivo ou JSON inline
           GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/secrets/gsa.json
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
