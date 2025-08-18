@@ -1,8 +1,6 @@
 name: Madesa Status Pipeline
 
 on:
-  schedule:
-    - cron: "30 9 * * *"   # 06:30 BRT (UTC-3)
   workflow_dispatch: {}
 
 jobs:
