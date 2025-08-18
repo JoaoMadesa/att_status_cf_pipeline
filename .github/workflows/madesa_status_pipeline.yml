@@ -2,7 +2,7 @@ name: Madesa Status Pipeline
 
 on:
   schedule:
-    - cron: "30 9 * * *"   # 06:30 BRT (UTC-3)
+    - cron: "30 9 * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -31,22 +31,30 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Se usar base64 para as credenciais (recomendado):
-      - name: Write Google credentials from base64
-        if: ${{ secrets.GSA_JSON_B64 != '' }}
+      # Escreve as credenciais se GSA_JSON_B64 estiver definido (sem usar if: no YAML)
+      - name: Write Google credentials (base64 -> arquivo, se houver)
         run: |
           mkdir -p "${{ github.workspace }}/secrets"
-          echo "${{ secrets.GSA_JSON_B64 }}" | base64 -d > "${{ github.workspace }}/secrets/gsa.json"
+          if [ -n "${{ secrets.GSA_JSON_B64 }}" ]; then
+            echo "${{ secrets.GSA_JSON_B64 }}" | base64 -d > "${{ github.workspace }}/secrets/gsa.json"
+            echo "Credenciais gravadas a partir de GSA_JSON_B64."
+          else
+            echo "GSA_JSON_B64 não definido. Se GOOGLE_CREDENTIALS_JSON estiver definido, o script usará inline."
+          fi
 
       - name: Pre-run checks
         run: |
-          if [ -n "${{ secrets.GSA_JSON_B64 }}" ]; then
-            test -s "${{ github.workspace }}/secrets/gsa.json" || (echo "ERRO: credenciais não criadas" && exit 1)
-            echo "Credenciais OK (arquivo)."
+          # Verifica se temos OU o arquivo decodificado OU o JSON inline
+          if [ -s "${{ github.workspace }}/secrets/gsa.json" ]; then
+            echo "OK: arquivo de credenciais presente."
+          elif [ -n "${{ secrets.GOOGLE_CREDENTIALS_JSON }}" ]; then
+            echo "OK: GOOGLE_CREDENTIALS_JSON (inline) será usado pelo script."
           else
-            echo "Usando GOOGLE_CREDENTIALS_JSON inline (env)."
+            echo "ERRO: Nenhuma credencial do Google informada (nem GSA_JSON_B64 nem GOOGLE_CREDENTIALS_JSON)."
+            exit 1
           fi
-          ls -la data || true
+          # Checa o DExPARA.xlsx
+          test -s "${{ github.workspace }}/data/DExPARA.xlsx" || (echo "ERRO: data/DExPARA.xlsx não encontrado" && exit 1)
 
       - name: Run pipeline
         env:
@@ -55,6 +63,7 @@ jobs:
           CF_IDCLIENTE: "206"
           CF_IDPRODUTO: "1"
           LOOKBACK_DIAS: "30"
+          # Google creds: arquivo (se criado) OU JSON inline (ambos suportados pelo script)
           GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/secrets/gsa.json
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
