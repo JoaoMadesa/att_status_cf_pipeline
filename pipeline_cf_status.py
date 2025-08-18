@@ -98,7 +98,7 @@ def autenticar(session: requests.Session) -> str:
 
 def montar_params(di, df, page, codigos):
     return {
-        "page": page, "size": PAGE_SIZE, "serie": "1,3",
+        "page": page, "size": PAGE_SIZE, "serie": "1,4",
         "de":  datetime.strptime(di, "%d-%m-%Y").strftime("%Y/%m/%d 00:00:00"),
         "ate": datetime.strptime(df, "%d-%m-%Y").strftime("%Y/%m/%d 23:59:59"),
         "codigoOcorrencia": codigos, "tipoData": "OCORRENCIA",
