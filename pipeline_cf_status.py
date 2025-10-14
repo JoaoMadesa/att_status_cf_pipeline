@@ -27,7 +27,6 @@ LOOKBACK_DIAS  = int(os.getenv("LOOKBACK_DIAS", "90"))
 
 # Google Sheets
 SHEET_ID   = os.getenv("SHEET_ID", "")  # obrigatório em CI
-SHEET_ID_EXTRA = os.getenv("SHEET_ID_EXTRA", "")
 SHEET_RANGE = "Entregues e Barrados!A2:D"
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
@@ -279,20 +278,6 @@ def run_pipeline(lookback: int, clear_first: bool = True):
 
     # Atualiza planilha principal
     copy_to_google_sheet(xlsx)
-
-    # Atualiza planilha extra (se informada)
-    if SHEET_ID_EXTRA:
-        print("[INFO] Atualizando segunda planilha...")
-        svc = gsheets_service()
-        df = pd.read_excel(xlsx, sheet_name="Atualizacao de Status", dtype=str).fillna("")
-        df = df.reindex(columns=["NUMERO","SERIE","TRANSPORTADORA","STATUS"])
-        body = {"values": df.values.tolist()}
-        svc.spreadsheets().values().update(
-            spreadsheetId=SHEET_ID_EXTRA, range=SHEET_RANGE, valueInputOption="RAW", body=body
-        ).execute()
-        print("[OK] Dados publicados na segunda planilha.")
-
-    print(f"[DONE] Pipeline em {_fmt(time.perf_counter()-t0)}")
 
 
 def cli():
