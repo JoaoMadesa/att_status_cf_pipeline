@@ -67,7 +67,6 @@ jobs:
           GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/secrets/gsa.json
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-          SHEET_ID_EXTRA: ${{ secrets.SHEET_ID_EXTRA }}
           OUTPUT_DIR: ${{ github.workspace }}/out_status
           DEXPARA_XLSX_PATH: ${{ github.workspace }}/data/DExPARA.xlsx
         run: |
