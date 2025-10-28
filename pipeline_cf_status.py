@@ -16,6 +16,7 @@ from urllib3.util.retry import Retry
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 import argparse
+import logging
 
 # ===================== CONFIG via ENV =====================
 # Confirma Fácil
@@ -57,6 +58,10 @@ CODES = {
     "CONTATOS CONFIRMADOS": "7,206",       # :contentReference[oaicite:5]{index=5}
 }
 
+# DEBUG
+DEBUG = os.getenv("DEBUG", "").lower() in ("1", "true", "yes")
+logging.basicConfig(level=logging.DEBUG if DEBUG else logging.INFO, format="%(levelname)s: %(message)s")
+
 # ===================== Helpers =====================
 def _fmt(s):  # duração bonitinha
     ms = int((s - int(s)) * 1000); h = int(s)//3600; m = (int(s)%3600)//60; sec = int(s)%60
@@ -66,11 +71,12 @@ def _norm(x):
     if pd.isna(x): return ""
     return str(x).strip().upper()
 
+
 def periodo(dias):
     hoje = datetime.today()
     di = (hoje - timedelta(days=dias)).strftime("%d-%m-%Y")
     df = hoje.strftime("%d-%m-%Y")
-    print(f"[INFO] Período: {di} até {df}")
+    logging.info(f"Período: {di} até {df}")
     return di, df
 
 def make_session(max_pool=40, total_retries=TOTAL_RETRIES, backoff=BACKOFF):
@@ -106,25 +112,46 @@ def montar_params(di, df, page, codigos):
 
 def fetch_page(session, token, params):
     r = session.get(OCORR_URL, headers={"Authorization": token, "accept": "application/json"}, params=params, timeout=TIMEOUT)
-    r.raise_for_status()
-    return r.json().get("respostas", []) or []
+    try:
+        r.raise_for_status()
+        data = r.json().get("respostas", []) or []
+        if DEBUG:
+            logging.debug(f"Fetched page {params.get('page')} size={len(data)}")
+        return data
+    except Exception as e:
+        snippet = (r.text[:500] + "...") if r is not None else ""
+        logging.warning(f"fetch_page falhou para page={params.get('page')}: {e} - resposta: {snippet}")
+        raise
 
 def consultar(session, token, di, df, codigos: str):
     params0 = montar_params(di, df, page=0, codigos=codigos)
-    j0 = session.get(OCORR_URL, headers={"Authorization": token, "accept":"application/json"}, params=params0, timeout=TIMEOUT).json()
+    r0 = session.get(OCORR_URL, headers={"Authorization": token, "accept":"application/json"}, params=params0, timeout=TIMEOUT)
+    try:
+        r0.raise_for_status()
+        j0 = r0.json()
+    except Exception as e:
+        snippet = (r0.text[:1000] + "...") if r0 is not None else ""
+        logging.error(f"Falha ao obter página 0: {e} - conteúdo: {snippet}")
+        raise
+
     total_pages = int(j0.get("totalPages", 0))
     resultados = j0.get("respostas", []) or []
+    logging.info(f"Consulta codigos={codigos} -> totalPages={total_pages} page0_len={len(resultados)}")
+
     if total_pages <= 1:
         return resultados
+
     futures = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         for p in range(1, total_pages):
             futures.append(ex.submit(fetch_page, session, token, montar_params(di, df, p, codigos)))
         for f in as_completed(futures):
             try:
-                resultados.extend(f.result())
+                page_res = f.result()
+                resultados.extend(page_res)
             except Exception as e:
-                print(f"[WARN] Página falhou: {e}")
+                logging.warning(f"[WARN] Página falhou: {e}")
+    logging.info(f"Total respostas coletadas para codigos={codigos}: {len(resultados)}")
     return resultados
 
 def format_data_iso_to_br(iso_str: str) -> str:
@@ -142,15 +169,29 @@ def extrair_df(respostas) -> pd.DataFrame:
     for item in respostas:
         emb = item.get("embarque") or {}
         entregas = emb.get("entregas") or []
-        data_raw = entregas[0].get("dataEntrega", "") if entregas else ""
-        linhas.append({
-            "NF":            emb.get("numero", ""),
-            "Serie":         emb.get("serie", ""),  # alguns endpoints não trazem; ficará vazio
-            "Transportadora":(emb.get("transportadora") or {}).get("nome", ""),
-            "Chave":         emb.get("chave", ""),
-            "Pedido":        (emb.get("pedido") or {}).get("numero", ""),
-            "DataEntrega":   format_data_iso_to_br(data_raw),
-        })
+        # Se houver múltiplas entregas, crie uma linha por entrega (antes pegava apenas a primeira)
+        if entregas:
+            for ent in entregas:
+                data_raw = ent.get("dataEntrega", "") if ent else ""
+                linhas.append({
+                    "NF":            emb.get("numero", ""),
+                    "Serie":         emb.get("serie", ""),  # alguns endpoints não trazem; ficará vazio
+                    "Transportadora":(emb.get("transportadora") or {}).get("nome", ""),
+                    "Chave":         emb.get("chave", ""),
+                    "Pedido":        (emb.get("pedido") or {}).get("numero", ""),
+                    "DataEntrega":   format_data_iso_to_br(data_raw),
+                })
+            if DEBUG and len(entregas) > 1:
+                logging.debug(f"embarque {emb.get('numero','?')} tem {len(entregas)} entregas; expandi para {len(entregas)} linhas")
+        else:
+            linhas.append({
+                "NF":            emb.get("numero", ""),
+                "Serie":         emb.get("serie", ""),
+                "Transportadora":(emb.get("transportadora") or {}).get("nome", ""),
+                "Chave":         emb.get("chave", ""),
+                "Pedido":        (emb.get("pedido") or {}).get("numero", ""),
+                "DataEntrega":   "",
+            })
     df = pd.DataFrame(linhas).astype(str).fillna("")
     return df
 
@@ -158,7 +199,7 @@ def salvar_csv(df: pd.DataFrame, nome_base: str) -> Path:
     path = OUTPUT_DIR / f"{nome_base}.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False, encoding="utf-8-sig")
-    print(f"[INFO] arquivo: {path} ({len(df):,} linhas)")
+    logging.info(f"arquivo: {path} ({len(df):,} linhas)")
     return path
 
 # ===================== ETAPA 1: gerar 4 CSVs =====================
@@ -173,9 +214,9 @@ def gerar_todos_csvs(lookback: int):
         resp = consultar(sess, token, di, df, cod)
         d   = extrair_df(resp)
         feitos[nome] = salvar_csv(d, nome)  # ENTREGUES.csv, etc
-        print(f"[INFO] {nome}: {_fmt(time.perf_counter()-tA)}")
+        logging.info(f"{nome}: {_fmt(time.perf_counter()-tA)}")
 
-    print(f"[OK] CSVs gerados em {_fmt(time.perf_counter()-t0)}")
+    logging.info(f"CSVs gerados em {_fmt(time.perf_counter()-t0)}")
     return feitos
 
 # ===================== ETAPA 2: DE→PARA + Excel =====================
@@ -210,7 +251,7 @@ def update_status(_output_dir: Path):
         if st not in planilhas: continue
         chave = planilhas[st][["NUMERO","TRANSPORTADORA"]].apply(tuple, axis=1)
         planilhas[st] = planilhas[st][~chave.isin(notas)]
-        notas.update(planilhas[st][["NUMERO","TRANSPORTADORA"]].apply(tuple, axis=1))
+        notas.update(planilhas[st][["NUMERO","TRANSPORTADORA"].apply(tuple, axis=1)])
 
     df_final = pd.concat([planilhas[st] for st in ordem if st in planilhas], ignore_index=True)
 
@@ -233,7 +274,7 @@ def update_status(_output_dir: Path):
         pd.DataFrame(sorted(nao_mapeadas), columns=["TRANSPORTADORA_NAO_ENCONTRADA"]).to_excel(
             w, index=False, sheet_name="Transportadoras Nao Encontradas"
         )
-    print(f"[OK] Excel gerado: {out_xlsx}")
+    logging.info(f"Excel gerado: {out_xlsx}")
     return out_xlsx
 
 # ===================== ETAPA 3: Google Sheets =====================
@@ -254,7 +295,7 @@ def clear_google_sheet():
     if not SHEET_ID: raise RuntimeError("Defina SHEET_ID")
     svc = gsheets_service()
     svc.spreadsheets().values().clear(spreadsheetId=SHEET_ID, range=SHEET_RANGE).execute()
-    print("[OK] Limpou aba no Google Sheets.")
+    logging.info("Limpou aba no Google Sheets.")
 
 def copy_to_google_sheet(xlsx_path: Path):
     if not SHEET_ID: raise RuntimeError("Defina SHEET_ID")
@@ -265,7 +306,7 @@ def copy_to_google_sheet(xlsx_path: Path):
     svc.spreadsheets().values().update(
         spreadsheetId=SHEET_ID, range=SHEET_RANGE, valueInputOption="RAW", body=body
     ).execute()
-    print("[OK] Dados publicados no Google Sheets.")
+    logging.info("Dados publicados no Google Sheets.")
 
 # ===================== ORQUESTRAÇÃO =====================
 def run_pipeline(lookback: int, clear_first: bool = True):
@@ -279,7 +320,6 @@ def run_pipeline(lookback: int, clear_first: bool = True):
     # Atualiza planilha principal
     copy_to_google_sheet(xlsx)
 
-
 def cli():
     p = argparse.ArgumentParser(description="Pipeline CF → 4 CSVs → DE→PARA → Excel → Google Sheets")
     p.add_argument("--run", action="store_true", help="Executa o pipeline completo.")
@@ -292,7 +332,6 @@ def cli():
         # modo simples: só gera CSVs e Excel (sem Google)
         gerar_todos_csvs(args.lookback)
         update_status(OUTPUT_DIR)
-        print("[INFO] Rode com --run para publicar no Google.")
-
+        logging.info("Rode com --run para publicar no Google.")
 if __name__ == "__main__":
     cli()
