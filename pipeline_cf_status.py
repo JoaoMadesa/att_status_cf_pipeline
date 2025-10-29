@@ -251,7 +251,7 @@ def update_status(_output_dir: Path):
         if st not in planilhas: continue
         chave = planilhas[st][["NUMERO","TRANSPORTADORA"]].apply(tuple, axis=1)
         planilhas[st] = planilhas[st][~chave.isin(notas)]
-        notas.update(planilhas[st][["NUMERO","TRANSPORTADORA"].apply(tuple, axis=1)])
+        notas.update(planilhas[st][["NUMERO", "TRANSPORTADORA"]].apply(tuple, axis=1))
 
     df_final = pd.concat([planilhas[st] for st in ordem if st in planilhas], ignore_index=True)
 
