@@ -243,7 +243,7 @@ def update_status(_output_dir: Path):
         # filtro SERIE != 3
         s_num = pd.to_numeric(df["SERIE"], errors="coerce")
         df = df[s_num != 3]
-        planilhas[status] = df[["NUMERO","SERIE","TRANSPORTADORA","STATUS"]].copy()
+        planilhas[status] = df[["NUMERO","SERIE","CHAVE","TRANSPORTADORA","STATUS"]].copy()
 
     ordem = ["ENTREGUE","CANCELADO","DADOS CONFIRMADOS","CONTATOS CONFIRMADOS"]
     notas = set()
@@ -301,7 +301,7 @@ def copy_to_google_sheet(xlsx_path: Path):
     if not SHEET_ID: raise RuntimeError("Defina SHEET_ID")
     svc = gsheets_service()
     df = pd.read_excel(xlsx_path, sheet_name="Atualizacao de Status", dtype=str).fillna("")
-    df = df.reindex(columns=["NUMERO","SERIE","TRANSPORTADORA","STATUS"])
+    df = df.reindex(columns=["NUMERO","SERIE","CHAVE","TRANSPORTADORA","STATUS"])
     body = {"values": df.values.tolist()}
     svc.spreadsheets().values().update(
         spreadsheetId=SHEET_ID, range=SHEET_RANGE, valueInputOption="RAW", body=body
