@@ -28,7 +28,7 @@ LOOKBACK_DIAS  = int(os.getenv("LOOKBACK_DIAS", "90"))
 
 # Google Sheets
 SHEET_ID   = os.getenv("SHEET_ID", "")  # obrigatório em CI
-SHEET_RANGE = "Entregues e Barrados!A2:D"
+SHEET_RANGE = "Entregues e Barrados!A2:E"
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
 
