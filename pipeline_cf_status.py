@@ -24,7 +24,7 @@ CF_EMAIL       = os.getenv("CF_EMAIL", "")
 CF_SENHA       = os.getenv("CF_SENHA", "")
 CF_IDCLIENTE   = int(os.getenv("CF_IDCLIENTE", "206"))
 CF_IDPRODUTO   = int(os.getenv("CF_IDPRODUTO", "1"))
-LOOKBACK_DIAS  = int(os.getenv("LOOKBACK_DIAS", "30"))
+LOOKBACK_DIAS  = int(os.getenv("LOOKBACK_DIAS", "5"))
 
 # Google Sheets
 SHEET_ID   = os.getenv("SHEET_ID", "")  # obrigatório em CI
