@@ -71,7 +71,7 @@ jobs:
           OUTPUT_DIR: ${{ github.workspace }}/out_status
           DEXPARA_XLSX_PATH: ${{ github.workspace }}/data/DExPARA.xlsx
         run: |
-          python pipeline_cf_status.py --run --lookback "${LOOKBACK_DIAS}"
+          python pipeline_cf_status_att.py --run --lookback "${LOOKBACK_DIAS}"
 
       - name: Upload artifacts
         if: always()
