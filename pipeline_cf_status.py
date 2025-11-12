@@ -45,8 +45,8 @@ BASE_URL   = "https://utilities.confirmafacil.com.br"
 LOGIN_URL  = f"{BASE_URL}/login/login"
 OCORR_URL  = f"{BASE_URL}/filter/ocorrencia"
 PAGE_SIZE  = int(os.getenv("PAGE_SIZE", "1000"))
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "10"))
-TIMEOUT    = (5, 120)
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "5"))
+TIMEOUT    = (5, 180)
 TOTAL_RETRIES = 3
 BACKOFF      = 1
 
@@ -111,7 +111,10 @@ def montar_params(di, df, page, codigos):
     }
 
 def fetch_page(session, token, params):
+    logging.debug(f"Fetching page {params.get('page')} with parameters {params}")  # Adicionando log detalhado
+
     r = session.get(OCORR_URL, headers={"Authorization": token, "accept": "application/json"}, params=params, timeout=TIMEOUT)
+    
     try:
         r.raise_for_status()
         data = r.json().get("respostas", []) or []
