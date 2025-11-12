@@ -63,7 +63,7 @@ jobs:
           CF_SENHA: ${{ secrets.CF_SENHA }}
           CF_IDCLIENTE: "206"
           CF_IDPRODUTO: "1"
-          LOOKBACK_DIAS: "15"
+          LOOKBACK_DIAS: "60"
           # Google creds: arquivo (se criado) OU JSON inline (ambos suportados pelo script)
           GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/secrets/gsa.json
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
