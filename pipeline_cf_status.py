@@ -44,11 +44,11 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 BASE_URL   = "https://utilities.confirmafacil.com.br"
 LOGIN_URL  = f"{BASE_URL}/login/login"
 OCORR_URL  = f"{BASE_URL}/filter/ocorrencia"
-PAGE_SIZE  = int(os.getenv("PAGE_SIZE", "1000"))
+PAGE_SIZE  = int(os.getenv("PAGE_SIZE", "500"))
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "10"))
-TIMEOUT    = (5, 60)
+TIMEOUT    = (5, 120)
 TOTAL_RETRIES = 3
-BACKOFF      = 0.5
+BACKOFF      = 1
 
 # Códigos de ocorrência
 CODES = {
