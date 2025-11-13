@@ -356,7 +356,7 @@ def run_pipeline(lookback, clear_first=True):
 
 def cli():
     p = argparse.ArgumentParser()
-    p.add_argument("--run", action="true", help="Executa o pipeline completo.")
+    p.add_argument("--run", action="store_true", help="Executa o pipeline completo.")
     p.add_argument("--lookback", type=int, default=LOOKBACK_DIAS)
     p.add_argument("--noclear", action="store_true")
     args = p.parse_args()
