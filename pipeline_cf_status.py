@@ -23,7 +23,7 @@ CF_EMAIL       = os.getenv("CF_EMAIL", "")
 CF_SENHA       = os.getenv("CF_SENHA", "")
 CF_IDCLIENTE   = int(os.getenv("CF_IDCLIENTE", "206"))
 CF_IDPRODUTO   = int(os.getenv("CF_IDPRODUTO", "1"))
-LOOKBACK_DIAS  = int(os.getenv("LOOKBACK_DIAS", "5"))
+LOOKBACK_DIAS  = int(os.getenv("LOOKBACK_DIAS", "30"))
 
 SHEET_ID   = os.getenv("SHEET_ID", "")
 SHEET_RANGE = "Entregues e Barrados!A2:E"
@@ -40,9 +40,9 @@ BASE_URL   = "https://utilities.confirmafacil.com.br"
 LOGIN_URL  = f"{BASE_URL}/login/login"
 OCORR_URL  = f"{BASE_URL}/filter/ocorrencia"
 
-PAGE_SIZE  = int(os.getenv("PAGE_SIZE", "500"))
+PAGE_SIZE  = int(os.getenv("PAGE_SIZE", "1000"))
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "5"))
-TIMEOUT    = (5, 180)
+TIMEOUT    = (5, 120)
 TOTAL_RETRIES = 3
 BACKOFF      = 1
 
