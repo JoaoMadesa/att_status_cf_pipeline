@@ -288,7 +288,7 @@ def update_status(_output_dir: Path):
         planilhas[st] = planilhas[st][~chave.isin(notas)]
         notas.update(planilhas[st][["NUMERO","TRANSPORTADORA"]].apply(tuple, axis=1))
 
-    df_final = pd.concat([planilhas[st] for st in ordem if st in planilhas], ignore_index=True)
+    df_final = pd.concat([planilhas[st] for st in ordem if st in planilhas], ignore_index=True, copy=False)
 
     # Carrega DExPARA
     mapa = pd.read_excel(DEXPARA_XLSX_PATH, sheet_name=DEXPARA_SHEET, usecols=[0,1],
@@ -322,26 +322,41 @@ def gsheets_service():
     return build("sheets","v4",credentials=creds)
 
 def clear_google_sheet():
-    if not SHEET_ID: raise RuntimeError("Defina SHEET_ID.")
-    svc = gsheets_service()
-    svc.spreadsheets().values().clear(spreadsheetId=SHEET_ID, range=SHEET_RANGE).execute()
-    logging.info("Limpou aba do Google Sheets.")
+    try:
+        svc = gsheets_service()
+        svc.spreadsheets().values().clear(
+            spreadsheetId=SHEET_ID, 
+            range=SHEET_RANGE
+        ).execute()
+        logging.info("Limpou aba do Google Sheets.")
+    except Exception as e:
+        logging.error(f"Erro limpando aba: {e}")
+        raise
 
-def copy_to_google_sheet(xlsx_path: Path):
-    if not SHEET_ID: raise RuntimeError("Defina SHEET_ID.")
+def copy_to_google_sheet_chunked(xlsx_path: Path, chunk_size=5000):
+    if not SHEET_ID:
+        raise RuntimeError("Defina SHEET_ID.")
+    
     svc = gsheets_service()
 
     df = pd.read_excel(xlsx_path, sheet_name="Atualizacao de Status", dtype=str).fillna("")
     df = df.reindex(columns=["NUMERO","SERIE","CHAVE","TRANSPORTADORA","STATUS"])
+    values = df.values.tolist()
 
-    svc.spreadsheets().values().update(
-        spreadsheetId=SHEET_ID,
-        range=SHEET_RANGE,
-        valueInputOption="RAW",
-        body={"values": df.values.tolist()}
-    ).execute()
+    # envia em blocos pequenos
+    for i in range(0, len(values), chunk_size):
+        chunk = values[i:i+chunk_size]
 
-    logging.info("Dados publicados no Google Sheets.")
+        svc.spreadsheets().values().append(
+            spreadsheetId=SHEET_ID,
+            range=SHEET_RANGE,
+            valueInputOption="RAW",
+            body={"values": chunk}
+        ).execute()
+
+        logging.info(f"Enviado bloco {i//chunk_size +1} ({len(chunk)} linhas)")
+
+    logging.info("Dados publicados no Google Sheets via chunks.")
 
 # ===================== RUN =====================
 
@@ -352,7 +367,7 @@ def run_pipeline(lookback, clear_first=True):
     if clear_first:
         clear_google_sheet()
 
-    copy_to_google_sheet(xlsx)
+    copy_to_google_sheet_chunked(xlsx)
 
 def cli():
     p = argparse.ArgumentParser()
