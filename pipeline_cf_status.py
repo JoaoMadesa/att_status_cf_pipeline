@@ -333,7 +333,7 @@ def clear_google_sheet():
         logging.error(f"Erro limpando aba: {e}")
         raise
 
-def copy_to_google_sheet_chunked(xlsx_path: Path, chunk_size=5000):
+def copy_to_google_sheet_chunked(xlsx_path: Path, chunk_size=10000):
     if not SHEET_ID:
         raise RuntimeError("Defina SHEET_ID.")
     
