@@ -2,7 +2,7 @@ name: Madesa Status Pipeline
 
 on:
   schedule:
-    - cron: "15 9 * * *"
+    - cron: "50 8 * * *"
   workflow_dispatch: {}
 
 jobs:
