@@ -2,22 +2,26 @@ name: Madesa Status Pipeline
 
 on:
   schedule:
-    - cron: "50 8 * * *"
+    - cron: "50 8 * * *" # diariamente às 08:50 UTC
   workflow_dispatch: {}
 
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      # ===================== CHECKOUT =====================
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ===================== PYTHON =====================
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
-      - name: Create requirements
+      # ===================== DEPENDÊNCIAS =====================
+      - name: Install dependencies
         run: |
           cat > requirements.txt << 'EOF'
           google-api-python-client==2.138.0
@@ -32,47 +36,63 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Escreve as credenciais se GSA_JSON_B64 estiver definido (sem usar if: no YAML)
-      - name: Write Google credentials (base64 -> arquivo, se houver)
+      # ===================== GOOGLE CREDENTIALS =====================
+      - name: Write Google credentials (base64 -> file, if provided)
         run: |
           mkdir -p "${{ github.workspace }}/secrets"
           if [ -n "${{ secrets.GSA_JSON_B64 }}" ]; then
             echo "${{ secrets.GSA_JSON_B64 }}" | base64 -d > "${{ github.workspace }}/secrets/gsa.json"
             echo "Credenciais gravadas a partir de GSA_JSON_B64."
           else
-            echo "GSA_JSON_B64 não definido. Se GOOGLE_CREDENTIALS_JSON estiver definido, o script usará inline."
+            echo "GSA_JSON_B64 não definido. Usando GOOGLE_CREDENTIALS_JSON (inline), se existir."
           fi
 
+      # ===================== PRE-RUN CHECKS =====================
       - name: Pre-run checks
         run: |
-          # Verifica se temos OU o arquivo decodificado OU o JSON inline
           if [ -s "${{ github.workspace }}/secrets/gsa.json" ]; then
             echo "OK: arquivo de credenciais presente."
           elif [ -n "${{ secrets.GOOGLE_CREDENTIALS_JSON }}" ]; then
-            echo "OK: GOOGLE_CREDENTIALS_JSON (inline) será usado pelo script."
+            echo "OK: GOOGLE_CREDENTIALS_JSON (inline) será usado."
           else
-            echo "ERRO: Nenhuma credencial do Google informada (nem GSA_JSON_B64 nem GOOGLE_CREDENTIALS_JSON)."
+            echo "ERRO: Nenhuma credencial do Google informada."
             exit 1
           fi
-          # Checa o DExPARA.xlsx
-          test -s "${{ github.workspace }}/data/DExPARA.xlsx" || (echo "ERRO: data/DExPARA.xlsx não encontrado" && exit 1)
 
-      - name: Run pipeline
+          test -s "${{ github.workspace }}/data/DExPARA.xlsx" || \
+            (echo "ERRO: data/DExPARA.xlsx não encontrado" && exit 1)
+
+      # ===================== RESTORE INCREMENTAL STATE =====================
+      - name: Restore incremental state (last_run)
+        uses: actions/cache@v4
+        with:
+          path: out_status/last_run.txt
+          key: madesa-status-last-run
+
+      # ===================== RUN PIPELINE =====================
+      - name: Run status pipeline
         env:
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           CF_SENHA: ${{ secrets.CF_SENHA }}
           CF_IDCLIENTE: "206"
           CF_IDPRODUTO: "1"
-          LOOKBACK_DIAS: "60"
-          # Google creds: arquivo (se criado) OU JSON inline (ambos suportados pelo script)
+
+          # lookback só é usado se last_run.txt não existir
+          LOOKBACK_DIAS: "15"
+
+          # Google Sheets
           GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/secrets/gsa.json
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
+
+          # Paths
           OUTPUT_DIR: ${{ github.workspace }}/out_status
           DEXPARA_XLSX_PATH: ${{ github.workspace }}/data/DExPARA.xlsx
-        run: |
-          python pipeline_cf_status.py --run --lookback "${LOOKBACK_DIAS}"
 
+        run: |
+          python processoAtt.py
+
+      # ===================== UPLOAD ARTIFACTS =====================
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -80,8 +100,5 @@ jobs:
           name: saida
           if-no-files-found: ignore
           path: |
-            out_status/ENTREGUES.csv
-            out_status/CANCELADOS.csv
-            out_status/DADOS CONFIRMADOS.csv
-            out_status/CONTATOS CONFIRMADOS.csv
+            out_status/last_run.txt
             out_status/ATUALIZACAO_DE_STATUS.xlsx
