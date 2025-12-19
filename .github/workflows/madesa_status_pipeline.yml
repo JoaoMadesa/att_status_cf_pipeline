@@ -2,7 +2,7 @@ name: Madesa Status Pipeline
 
 on:
   schedule:
-    - cron: "50 8 * * *"
+    - cron: "50 8 * * *" # diariamente às 08:50 UTC
   workflow_dispatch: {}
 
 jobs:
@@ -10,17 +10,39 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # ===================== CHECKOUT =====================
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      # ===================== PYTHON =====================
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
+      # ===================== DEPENDÊNCIAS =====================
       - name: Install dependencies
         run: |
-          pip install pandas openpyxl requests google-api-python-client google-auth pyarrow
+          python -m pip install --upgrade pip
+          pip install \
+            pandas \
+            openpyxl \
+            requests \
+            google-api-python-client \
+            google-auth \
+            google-auth-httplib2 \
+            urllib3 \
+            pyarrow
 
-      - name: Restore incremental state (last_run + base parquet)
+      # ===================== GOOGLE CREDENTIALS =====================
+      - name: Write Google credentials (GSA_JSON_B64 → arquivo)
+        run: |
+          mkdir -p "${{ github.workspace }}/secrets"
+          echo "${{ secrets.GSA_JSON_B64 }}" | base64 -d > "${{ github.workspace }}/secrets/gsa.json"
+          echo "Arquivo secrets/gsa.json criado."
+
+      # ===================== RESTORE CACHE (INCREMENTAL + HISTÓRICO) =====================
+      - name: Restore incremental state (last_run + parquet)
         uses: actions/cache@v4
         with:
           path: |
@@ -28,18 +50,37 @@ jobs:
             out_status/base_status.parquet
           key: madesa-status-historico
 
-      - name: Run pipeline
+      # ===================== RUN PIPELINE =====================
+      - name: Run status pipeline
         env:
+          # Confirma Fácil
           CF_EMAIL: ${{ secrets.CF_EMAIL }}
           CF_SENHA: ${{ secrets.CF_SENHA }}
           CF_IDCLIENTE: "206"
           CF_IDPRODUTO: "1"
-          LOOKBACK_DIAS: "15"
 
-          GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/secrets/gsa.json
+          # Lookback usado apenas na 1ª execução
+          LOOKBACK_DIAS: "60"
+
+          # Google Sheets
           SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/secrets/gsa.json
 
+          # Paths
           OUTPUT_DIR: ${{ github.workspace }}/out_status
           DEXPARA_XLSX_PATH: ${{ github.workspace }}/data/DExPARA.xlsx
+
         run: |
           python processoAtt.py
+
+      # ===================== UPLOAD ARTIFACTS (DEBUG) =====================
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saida
+          if-no-files-found: ignore
+          path: |
+            out_status/last_run.txt
+            out_status/base_status.parquet
+            out_status/ATUALIZACAO_DE_STATUS.xlsx
