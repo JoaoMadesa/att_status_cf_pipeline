@@ -58,6 +58,10 @@ jobs:
           CF_SENHA: ${{ secrets.CF_SENHA }}
           CF_IDCLIENTE: "206"
           CF_IDPRODUTO: "1"
+<<<<<<< HEAD
+=======
+          LOOKBACK_DIAS: "60"
+>>>>>>> 021ce0b0ab9dda7f708462580ca2b0a7847d4516
 
           # Lookback usado apenas na 1ª execução
           LOOKBACK_DIAS: "60"
