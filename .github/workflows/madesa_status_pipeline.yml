@@ -34,7 +34,7 @@ jobs:
           CF_SENHA: ${{ secrets.CF_SENHA }}
           CF_IDCLIENTE: "206"
           CF_IDPRODUTO: "1"
-          LOOKBACK_DIAS: "15"
+          LOOKBACK_DIAS: "60"
 
           GOOGLE_CREDENTIALS_PATH: ${{ github.workspace }}/secrets/gsa.json
           SHEET_ID: ${{ secrets.SHEET_ID }}
