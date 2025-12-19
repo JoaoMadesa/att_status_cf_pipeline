@@ -1,18 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 pipeline_cf_status.py
-VERSÃO FINAL OTIMIZADA E VALIDADA COM JSON REAL DA API
+MODELO C — BASE HISTÓRICA LOCAL (PARQUET) + INCREMENTAL
 
-Otimizações:
-- Coleta única (todos códigos em uma chamada)
-- Incremental (last_run.txt)
-- Deduplicação por NF + Série + Chave + Transportadora
-- Prioridade de status (ENTREGUE > CANCELADO > ...)
-- Paginação dinâmica
-- Extração correta do status via tipoOcorrencia.codigo
+- Incremental da API via last_run.txt
+- Histórico persistente em Parquet
+- Merge pela CHAVE NF-e (PK absoluta)
+- Snapshot completo enviado ao Google Sheets
 """
 
-import os, json, time
+import os, json
 from pathlib import Path
 from datetime import datetime, timedelta
 import pandas as pd
@@ -21,32 +18,28 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-import argparse
 import logging
 
 # ===================== CONFIG =====================
-CF_EMAIL       = os.getenv("CF_EMAIL", "")
-CF_SENHA       = os.getenv("CF_SENHA", "")
-CF_IDCLIENTE   = int(os.getenv("CF_IDCLIENTE", "206"))
-CF_IDPRODUTO   = int(os.getenv("CF_IDPRODUTO", "1"))
-LOOKBACK_DIAS  = int(os.getenv("LOOKBACK_DIAS", "30"))
+CF_EMAIL = os.getenv("CF_EMAIL")
+CF_SENHA = os.getenv("CF_SENHA")
+CF_IDCLIENTE = int(os.getenv("CF_IDCLIENTE", "206"))
+CF_IDPRODUTO = int(os.getenv("CF_IDPRODUTO", "1"))
+LOOKBACK_DIAS = int(os.getenv("LOOKBACK_DIAS", "15"))
 
-SHEET_ID   = os.getenv("SHEET_ID", "")
+SHEET_ID = os.getenv("SHEET_ID")
 SHEET_RANGE = "Entregues e Barrados!A2:E"
 
-GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "")
-GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "")
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "out_status"))
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+BASE_PARQUET = OUTPUT_DIR / "base_status.parquet"
+LAST_RUN_PATH = OUTPUT_DIR / "last_run.txt"
 
 DEXPARA_XLSX_PATH = os.getenv("DEXPARA_XLSX_PATH")
-DEXPARA_SHEET     = os.getenv("DEXPARA_SHEET", "TRANSPORTADORA")
+DEXPARA_SHEET = "TRANSPORTADORA"
 
-OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "out_status"))
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-LAST_RUN_PATH = OUTPUT_DIR / "last_run.txt"
-INCREMENTAL = True
-
-BASE_URL  = "https://utilities.confirmafacil.com.br"
+BASE_URL = "https://utilities.confirmafacil.com.br"
 LOGIN_URL = f"{BASE_URL}/login/login"
 OCORR_URL = f"{BASE_URL}/filter/ocorrencia"
 
@@ -58,41 +51,45 @@ logging.basicConfig(level=logging.DEBUG if DEBUG else logging.INFO,
                     format="%(levelname)s: %(message)s")
 
 # ===================== STATUS =====================
-CODES = {
-    "ENTREGUE": "1,2,37,999",
-    "CANCELADO": "25,102,203,303,325,327",
-    "DADOS CONFIRMADOS": "200,201,202",
-    "CONTATOS CONFIRMADOS": "7,206",
-}
-
-STATUS_PRIORITY = ["ENTREGUE", "CANCELADO", "DADOS CONFIRMADOS", "CONTATOS CONFIRMADOS"]
-PRIORITY_RANK = {s: i for i, s in enumerate(STATUS_PRIORITY)}
-
 STATUS_MAP = {
-    c: st
-    for st, codes in CODES.items()
-    for c in codes.split(",")
+    "1": "ENTREGUE",
+    "2": "ENTREGUE",
+    "37": "ENTREGUE",
+    "999": "ENTREGUE",
+    "25": "CANCELADO",
+    "102": "CANCELADO",
+    "203": "CANCELADO",
+    "303": "CANCELADO",
+    "325": "CANCELADO",
+    "327": "CANCELADO",
+    "200": "DADOS CONFIRMADOS",
+    "201": "DADOS CONFIRMADOS",
+    "202": "DADOS CONFIRMADOS",
+    "7": "CONTATOS CONFIRMADOS",
+    "206": "CONTATOS CONFIRMADOS",
 }
 
+PRIORITY = ["ENTREGUE","CANCELADO","DADOS CONFIRMADOS","CONTATOS CONFIRMADOS"]
+PRIORITY_RANK = {s:i for i,s in enumerate(PRIORITY)}
 ALL_CODES = ",".join(STATUS_MAP.keys())
 
-# ===================== UTIL =====================
-def _norm(x):
-    return "" if pd.isna(x) else str(x).strip().upper()
+COLS = ["CHAVE","NUMERO","SERIE","TRANSPORTADORA","STATUS","DATA_ULTIMA_OCORRENCIA"]
 
+# ===================== UTIL =====================
 def dt_api(dt, end=False):
     if end:
         dt = dt.replace(hour=23, minute=59, second=59)
     return dt.strftime("%Y/%m/%d %H:%M:%S")
 
 def periodo():
-    agora = datetime.now()
-    if INCREMENTAL and LAST_RUN_PATH.exists():
+    now = datetime.now()
+    if LAST_RUN_PATH.exists():
         di = datetime.fromisoformat(LAST_RUN_PATH.read_text()) + timedelta(seconds=1)
         logging.info(f"Incremental ON desde {di}")
     else:
-        di = agora - timedelta(days=LOOKBACK_DIAS)
-    return di, agora
+        di = now - timedelta(days=LOOKBACK_DIAS)
+        logging.info(f"Primeira execução (lookback {LOOKBACK_DIAS} dias)")
+    return di, now
 
 # ===================== API =====================
 def make_session():
@@ -100,21 +97,16 @@ def make_session():
     retries = Retry(total=3, backoff_factor=1,
                     status_forcelist=[429,500,502,503,504],
                     allowed_methods={"GET","POST"})
-    adapter = HTTPAdapter(max_retries=retries)
-    s.mount("https://", adapter)
+    s.mount("https://", HTTPAdapter(max_retries=retries))
     return s
 
 def autenticar(session):
-    r = session.post(
-        LOGIN_URL,
-        json={
-            "email": CF_EMAIL,
-            "senha": CF_SENHA,
-            "idcliente": CF_IDCLIENTE,
-            "idproduto": CF_IDPRODUTO
-        },
-        timeout=TIMEOUT
-    )
+    r = session.post(LOGIN_URL, json={
+        "email": CF_EMAIL,
+        "senha": CF_SENHA,
+        "idcliente": CF_IDCLIENTE,
+        "idproduto": CF_IDPRODUTO
+    }, timeout=TIMEOUT)
     r.raise_for_status()
     return r.json()["resposta"]["token"]
 
@@ -143,86 +135,80 @@ def iter_respostas(session, token, di, df):
         yield data
         page += 1
 
-# ===================== EXTRAÇÃO =====================
-def extract_codigo(item):
-    try:
-        return str(item["tipoOcorrencia"]["codigo"])
-    except Exception:
-        return ""
-
-def should_replace(old, new):
-    if not old:
-        return True
-    return PRIORITY_RANK[new] < PRIORITY_RANK[old]
-
-def coletar_dados(session, token, di, df):
-    best = {}
-
+# ===================== COLETA =====================
+def coletar_incremental(session, token, di, df):
+    registros = {}
     for page in iter_respostas(session, token, di, df):
         for item in page:
             emb = item.get("embarque", {})
-            serie = emb.get("serie", "")
-            if str(serie) == "3":
+            chave = emb.get("chave")
+            if not chave:
                 continue
 
-            codigo = extract_codigo(item)
+            serie = str(emb.get("serie",""))
+            if serie == "3":
+                continue
+
+            codigo = str(item.get("tipoOcorrencia",{}).get("codigo",""))
             status = STATUS_MAP.get(codigo)
             if not status:
                 continue
 
-            key = (
-                emb.get("numero",""),
-                emb.get("serie",""),
-                emb.get("chave",""),
-                (emb.get("transportadora") or {}).get("nome","")
-            )
+            data_occ = item.get("data")
 
-            if key not in best or should_replace(best[key]["STATUS"], status):
-                best[key] = {
-                    "NUMERO": key[0],
-                    "SERIE": key[1],
-                    "CHAVE": key[2],
-                    "TRANSPORTADORA": key[3],
-                    "STATUS": status
+            atual = registros.get(chave)
+            if not atual or PRIORITY_RANK[status] < PRIORITY_RANK[atual["STATUS"]]:
+                registros[chave] = {
+                    "CHAVE": chave,
+                    "NUMERO": emb.get("numero",""),
+                    "SERIE": serie,
+                    "TRANSPORTADORA": (emb.get("transportadora") or {}).get("nome",""),
+                    "STATUS": status,
+                    "DATA_ULTIMA_OCORRENCIA": data_occ,
                 }
 
-    return pd.DataFrame(best.values())
+    return pd.DataFrame(registros.values(), columns=COLS)
 
-# ===================== DExPARA =====================
+# ===================== BASE LOCAL =====================
+def carregar_base():
+    if BASE_PARQUET.exists():
+        return pd.read_parquet(BASE_PARQUET)
+    return pd.DataFrame(columns=COLS)
+
+def merge_base(base, novo):
+    base = base.set_index("CHAVE")
+    novo = novo.set_index("CHAVE")
+
+    base.update(novo)
+    novos = novo.loc[~novo.index.isin(base.index)]
+    base = pd.concat([base, novos])
+
+    return base.reset_index()
+
+# ===================== DEXPARA =====================
 def aplicar_dexpara(df):
-    mapa = pd.read_excel(
-        DEXPARA_XLSX_PATH,
-        sheet_name=DEXPARA_SHEET,
-        usecols=[0,1],
-        header=None,
-        names=["Original","Novo"],
-        dtype=str
-    )
-    m = {_norm(o): str(n).strip() for o,n in mapa.values if _norm(o)}
-    df["TRANSPORTADORA"] = df["TRANSPORTADORA"].map(lambda x: m.get(_norm(x), x))
+    mapa = pd.read_excel(DEXPARA_XLSX_PATH, sheet_name=DEXPARA_SHEET,
+                         usecols=[0,1], header=None, names=["O","N"], dtype=str)
+    d = {o.strip().upper(): (n or "").strip()
+         for o,n in mapa.values if isinstance(o,str)}
+    df["TRANSPORTADORA"] = df["TRANSPORTADORA"].map(lambda x: d.get(str(x).upper(), x))
     return df
 
-# ===================== GOOGLE SHEETS =====================
-def gsheets_service():
-    if GOOGLE_CREDENTIALS_JSON:
-        creds = Credentials.from_service_account_info(
-            json.loads(GOOGLE_CREDENTIALS_JSON),
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
-    else:
-        creds = Credentials.from_service_account_file(
-            GOOGLE_CREDENTIALS_PATH,
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
+# ===================== SHEETS =====================
+def gsheets():
+    creds = Credentials.from_service_account_file(
+        os.getenv("GOOGLE_CREDENTIALS_PATH"),
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
     return build("sheets","v4",credentials=creds)
 
 def publicar(df):
-    svc = gsheets_service()
+    svc = gsheets()
     svc.spreadsheets().values().clear(
         spreadsheetId=SHEET_ID, range=SHEET_RANGE
     ).execute()
 
-    values = df.values.tolist()
+    values = df[["NUMERO","SERIE","CHAVE","TRANSPORTADORA","STATUS"]].values.tolist()
     for i in range(0, len(values), 10000):
         svc.spreadsheets().values().append(
             spreadsheetId=SHEET_ID,
@@ -237,16 +223,16 @@ def run():
     sess = make_session()
     token = autenticar(sess)
 
-    df_final = coletar_dados(sess, token, di, df)
-    df_final = aplicar_dexpara(df_final)
+    df_inc = coletar_incremental(sess, token, di, df)
+    base = carregar_base()
+    base = merge_base(base, df_inc)
+    base = aplicar_dexpara(base)
 
-    out_xlsx = OUTPUT_DIR / "ATUALIZACAO_DE_STATUS.xlsx"
-    df_final.to_excel(out_xlsx, index=False)
-
-    publicar(df_final)
+    base.to_parquet(BASE_PARQUET, index=False)
+    publicar(base)
 
     LAST_RUN_PATH.write_text(df.isoformat())
-    logging.info(f"Pipeline finalizado ({len(df_final)} linhas).")
+    logging.info(f"Pipeline OK | Base histórica: {len(base)} registros")
 
 if __name__ == "__main__":
     run()
