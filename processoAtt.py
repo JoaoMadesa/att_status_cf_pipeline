@@ -239,24 +239,66 @@ def gsheets():
     return build("sheets", "v4", credentials=creds)
 
 def publicar(df):
-    logging.info("Publicando snapshot no Google Sheets...")
+    logging.info("Publicando snapshot no Google Sheets (modo overwrite real)...")
     svc = gsheets()
 
-    svc.spreadsheets().values().clear(
-        spreadsheetId=SHEET_ID, range=SHEET_RANGE
+    # 1️⃣ Descobrir sheetId da aba
+    meta = svc.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
+    sheets = meta["sheets"]
+
+    aba_nome = "Entregues e Barrados"
+    sheet_id = None
+
+    for s in sheets:
+        if s["properties"]["title"] == aba_nome:
+            sheet_id = s["properties"]["sheetId"]
+            break
+
+    if sheet_id is None:
+        raise RuntimeError(f"Aba '{aba_nome}' não encontrada no Sheets.")
+
+    linhas = len(df) + 1  # +1 se tiver cabeçalho
+    colunas = 5
+
+    # 2️⃣ RESETAR TAMANHO DA ABA (isso resolve o erro)
+    svc.spreadsheets().batchUpdate(
+        spreadsheetId=SHEET_ID,
+        body={
+            "requests": [
+                {
+                    "updateSheetProperties": {
+                        "properties": {
+                            "sheetId": sheet_id,
+                            "gridProperties": {
+                                "rowCount": linhas,
+                                "columnCount": colunas
+                            }
+                        },
+                        "fields": "gridProperties"
+                    }
+                }
+            ]
+        }
     ).execute()
 
-    values = df[["NUMERO", "SERIE", "CHAVE", "TRANSPORTADORA", "STATUS"]].values.tolist()
-    for i in range(0, len(values), 10000):
-        svc.spreadsheets().values().append(
-            spreadsheetId=SHEET_ID,
-            range=SHEET_RANGE,
-            valueInputOption="RAW",
-            body={"values": values[i:i+10000]}
-        ).execute()
-        logging.info(f"Bloco enviado ao Sheets | linhas {i}–{i+len(values[i:i+10000])}")
+    # 3️⃣ LIMPAR VALORES
+    svc.spreadsheets().values().clear(
+        spreadsheetId=SHEET_ID,
+        range=f"{aba_nome}!A1:E"
+    ).execute()
 
-    logging.info("Publicação no Google Sheets finalizada.")
+    # 4️⃣ ESCREVER DE UMA VEZ (overwrite real)
+    values = [df.columns.tolist()] + df.values.tolist()
+
+    svc.spreadsheets().values().update(
+        spreadsheetId=SHEET_ID,
+        range=f"{aba_nome}!A1",
+        valueInputOption="RAW",
+        body={"values": values}
+    ).execute()
+
+    logging.info("Publicação concluída com overwrite real (sem crescimento de células).")
+
 
 # ===================== RUN =====================
 def run():
