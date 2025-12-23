@@ -29,7 +29,6 @@ CF_IDPRODUTO = int(os.getenv("CF_IDPRODUTO", "1"))
 LOOKBACK_DIAS = int(os.getenv("LOOKBACK_DIAS", "15"))
 
 SHEET_ID = os.getenv("SHEET_ID")
-SHEET_RANGE = "Entregues e Barrados!A2:E"
 
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "out_status"))
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -85,6 +84,21 @@ def periodo():
         logging.info(f"Primeira execução | Lookback = {LOOKBACK_DIAS} dias")
     return di, now
 
+def validar_config():
+    faltando = []
+    for nome, valor in [
+        ("CF_EMAIL", CF_EMAIL),
+        ("CF_SENHA", CF_SENHA),
+        ("SHEET_ID", SHEET_ID),
+        ("DEXPARA_XLSX_PATH", DEXPARA_XLSX_PATH),
+    ]:
+        if not valor:
+            faltando.append(nome)
+    if faltando:
+        raise RuntimeError(f"Variaveis obrigatorias ausentes: {', '.join(faltando)}")
+    if not os.path.exists(DEXPARA_XLSX_PATH):
+        raise RuntimeError(f"Arquivo DExPARA nao encontrado: {DEXPARA_XLSX_PATH}")
+
 # ===================== API =====================
 def make_session():
     s = requests.Session()
@@ -111,37 +125,45 @@ def autenticar(session):
 def fetch_page(session, token, params):
     r = session.get(OCORR_URL, headers={"Authorization": token},
                     params=params, timeout=TIMEOUT)
-    if r.status_code != 200:
-        logging.warning(f"Falha na página {params.get('page')} | HTTP {r.status_code}")
-        return []
-    return r.json().get("respostas", [])
+    r.raise_for_status()
+    return r.json()
 
 def iter_respostas(session, token, di, df):
-    page = 0
     total = 0
     t0 = time.perf_counter()
 
-    while True:
-        params = {
-            "page": page,
-            "size": PAGE_SIZE,
-            "serie": "1,4",
-            "de": dt_api(di),
-            "ate": dt_api(df, True),
-            "codigoOcorrencia": ALL_CODES,
-            "tipoData": "OCORRENCIA",
-        }
+    params = {
+        "page": 0,
+        "size": PAGE_SIZE,
+        "serie": "1,4",
+        "de": dt_api(di),
+        "ate": dt_api(df, True),
+        "codigoOcorrencia": ALL_CODES,
+        "tipoData": "OCORRENCIA",
+    }
 
-        data = fetch_page(session, token, params)
-        if not data:
-            break
+    payload = fetch_page(session, token, params)
+    respostas = payload.get("respostas", []) or []
+    total_pages = int(payload.get("totalPages", 0) or 0)
+    if respostas:
+        total += len(respostas)
+        logging.info(f"Pagina 0 coletada | {len(respostas)} ocorrencias | Total parcial {total}")
+        yield respostas
 
-        total += len(data)
-        logging.info(f"Página {page} coletada | {len(data)} ocorrências | Total parcial {total}")
-        yield data
-        page += 1
+    if total_pages <= 0:
+        total_pages = 1
 
-    logging.info(f"Coleta finalizada | {total} ocorrências brutas | {_fmt(time.perf_counter()-t0)}")
+    for page in range(1, total_pages):
+        params["page"] = page
+        payload = fetch_page(session, token, params)
+        respostas = payload.get("respostas", []) or []
+        if not respostas:
+            continue
+        total += len(respostas)
+        logging.info(f"Pagina {page} coletada | {len(respostas)} ocorrencias | Total parcial {total}")
+        yield respostas
+
+    logging.info(f"Coleta finalizada | {total} ocorrencias brutas | {_fmt(time.perf_counter()-t0)}")
 
 def _fmt(s):
     h = int(s)//3600
@@ -169,9 +191,10 @@ def coletar_incremental(session, token, di, df):
                 continue
 
             data_occ = item.get("data")
+            data_occ_dt = pd.to_datetime(data_occ, errors="coerce")
             atual = registros.get(chave)
 
-            if not atual or PRIORITY_RANK[status] < PRIORITY_RANK[atual["STATUS"]]:
+            if not atual:
                 registros[chave] = {
                     "CHAVE": chave,
                     "NUMERO": emb.get("numero", ""),
@@ -180,6 +203,30 @@ def coletar_incremental(session, token, di, df):
                     "STATUS": status,
                     "DATA_ULTIMA_OCORRENCIA": data_occ,
                 }
+                continue
+
+            atual_rank = PRIORITY_RANK[atual["STATUS"]]
+            novo_rank = PRIORITY_RANK[status]
+            if novo_rank < atual_rank:
+                registros[chave] = {
+                    "CHAVE": chave,
+                    "NUMERO": emb.get("numero", ""),
+                    "SERIE": serie,
+                    "TRANSPORTADORA": (emb.get("transportadora") or {}).get("nome", ""),
+                    "STATUS": status,
+                    "DATA_ULTIMA_OCORRENCIA": data_occ,
+                }
+            elif novo_rank == atual_rank:
+                atual_dt = pd.to_datetime(atual.get("DATA_ULTIMA_OCORRENCIA"), errors="coerce")
+                if pd.isna(atual_dt) or (not pd.isna(data_occ_dt) and data_occ_dt > atual_dt):
+                    registros[chave] = {
+                        "CHAVE": chave,
+                        "NUMERO": emb.get("numero", ""),
+                        "SERIE": serie,
+                        "TRANSPORTADORA": (emb.get("transportadora") or {}).get("nome", ""),
+                        "STATUS": status,
+                        "DATA_ULTIMA_OCORRENCIA": data_occ,
+                    }
 
     df = pd.DataFrame(registros.values(), columns=COLS)
     logging.info(f"Após deduplicação: {len(df)} registros únicos por CHAVE")
@@ -304,6 +351,7 @@ def publicar(df):
 def run():
     t0 = time.perf_counter()
 
+    validar_config()
     di, df = periodo()
     sess = make_session()
     token = autenticar(sess)

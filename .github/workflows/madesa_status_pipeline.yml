@@ -48,7 +48,9 @@ jobs:
           path: |
             out_status/last_run.txt
             out_status/base_status.parquet
-          key: madesa-status-historico
+          key: madesa-status-${{ github.run_id }}
+          restore-keys: |
+            madesa-status-
 
       # ===================== RUN PIPELINE =====================
       - name: Run status pipeline
