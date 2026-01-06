@@ -62,7 +62,7 @@ jobs:
           CF_IDPRODUTO: "1"
 
           # Lookback usado apenas na 1ª execução
-          LOOKBACK_DIAS: "60"
+          LOOKBACK_DIAS: "30"
 
           # Google Sheets
           SHEET_ID: ${{ secrets.SHEET_ID }}
