@@ -76,12 +76,8 @@ def dt_api(dt, end=False):
 
 def periodo():
     now = datetime.now()
-    if LAST_RUN_PATH.exists():
-        di = datetime.fromisoformat(LAST_RUN_PATH.read_text()) + timedelta(seconds=1)
-        logging.info(f"Incremental ON | Buscando ocorrências desde {di}")
-    else:
-        di = now - timedelta(days=LOOKBACK_DIAS)
-        logging.info(f"Primeira execução | Lookback = {LOOKBACK_DIAS} dias")
+    di = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    logging.info("Janela fixa | Buscando ocorrencias de ontem 00:00 ate hoje 23:59:59")
     return di, now
 
 def validar_config():
