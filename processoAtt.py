@@ -125,8 +125,13 @@ def autenticar(session):
 def fetch_page(session, token, params):
     r = session.get(OCORR_URL, headers={"Authorization": token},
                     params=params, timeout=TIMEOUT)
+    if r.status_code == 401:
+        logging.warning("Token expirado (401). Reautenticando e repetindo a pagina...")
+        token = autenticar(session)
+        r = session.get(OCORR_URL, headers={"Authorization": token},
+                        params=params, timeout=TIMEOUT)
     r.raise_for_status()
-    return r.json()
+    return r.json(), token
 
 def iter_respostas(session, token, di, df):
     total = 0
@@ -142,7 +147,7 @@ def iter_respostas(session, token, di, df):
         "tipoData": "OCORRENCIA",
     }
 
-    payload = fetch_page(session, token, params)
+    payload, token = fetch_page(session, token, params)
     respostas = payload.get("respostas", []) or []
     total_pages = int(payload.get("totalPages", 0) or 0)
     if respostas:
@@ -155,7 +160,7 @@ def iter_respostas(session, token, di, df):
 
     for page in range(1, total_pages):
         params["page"] = page
-        payload = fetch_page(session, token, params)
+        payload, token = fetch_page(session, token, params)
         respostas = payload.get("respostas", []) or []
         if not respostas:
             continue
