@@ -3,7 +3,7 @@
 processoAtt.py
 MODELO C — BASE HISTÓRICA LOCAL (PARQUET) + INCREMENTAL
 
-- Incremental da API via last_run.txt
+- Janela fixa ontem/hoje; lookback inicial sem base
 - Histórico persistente em Parquet
 - Merge pela CHAVE NF-e (PK absoluta)
 - Snapshot completo enviado ao Google Sheets
@@ -76,8 +76,12 @@ def dt_api(dt, end=False):
 
 def periodo():
     now = datetime.now()
-    di = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    logging.info("Janela fixa | Buscando ocorrencias de ontem 00:00 ate hoje 23:59:59")
+    if BASE_PARQUET.exists():
+        di = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        logging.info("Janela fixa | Buscando ocorrencias de ontem 00:00 ate hoje 23:59:59")
+    else:
+        di = (now - timedelta(days=LOOKBACK_DIAS)).replace(hour=0, minute=0, second=0, microsecond=0)
+        logging.info(f"Sem base historica | Lookback = {LOOKBACK_DIAS} dias")
     return di, now
 
 def validar_config():
