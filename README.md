@@ -1,31 +1,30 @@
 # att_status_cf_pipeline
 
 Pipeline para atualizar o status de entregas no Google Sheets usando dados do Confirma Facil.
-O processo e incremental (usa last_run.txt), mantem uma base historica em Parquet e publica
-um snapshot completo na aba "Entregues e Barrados".
+Este repositorio foi pensado para rodar via GitHub Actions (nao e um script de uso diario no PC).
+O processo e incremental, mantem uma base historica em Parquet e publica um snapshot completo
+na aba "Entregues e Barrados".
 
 ## Estrutura do repositorio
 - `processoAtt.py`: pipeline principal (coleta, merge, DExPARA e publicacao)
 - `data/DExPARA.xlsx`: mapeamento de transportadoras (origem -> novo)
 - `.github/workflows/madesa_status_pipeline.yml`: GitHub Actions
 
-## Como funciona (resumo)
-1) Define periodo de coleta:
-   - Se `out_status/last_run.txt` existir, busca a partir dele (+1 segundo)
-   - Caso contrario, usa `LOOKBACK_DIAS`
+## Como funciona
+1) Define a janela de coleta:
+   - Se `out_status/base_status.parquet` existir (cache restaurado), busca de ontem 00:00 ate hoje 23:59:59
+   - Caso contrario, usa `LOOKBACK_DIAS` para o bootstrap inicial
+   - A API e consultada com `tipoData=CRIACAO` (data de criacao da ocorrencia)
 2) Busca ocorrencias na API com codigos relevantes
-3) Deduplica por CHAVE (prioridade de status + ultima ocorrencia)
-4) Faz merge com base historica local (Parquet)
+3) Deduplica por CHAVE (prioridade de status; se empatar, usa a data mais recente)
+4) Faz merge com a base historica local (Parquet)
 5) Aplica DExPARA em transportadoras
 6) Publica o snapshot no Google Sheets
 
 ## Dependencias
-Python 3.10+ recomendado.
-
-Instale localmente:
-```powershell
-pip install pandas requests google-api-python-client google-auth google-auth-httplib2 urllib3 pyarrow openpyxl
-```
+Python 3.10+ recomendado. O workflow instala:
+`pandas`, `openpyxl`, `requests`, `google-api-python-client`, `google-auth`,
+`google-auth-httplib2`, `urllib3`, `pyarrow`.
 
 ## Variaveis de ambiente
 Obrigatorias:
@@ -42,31 +41,16 @@ Opcionais (com padrao):
 - `OUTPUT_DIR` (default: `out_status`)
 - `DEBUG` (1/true/yes ativa logs mais verbosos)
 
-## Rodar localmente
-1) Ajuste as variaveis de ambiente (exemplo):
-```powershell
-$env:CF_EMAIL="seu_email"
-$env:CF_SENHA="sua_senha"
-$env:SHEET_ID="id_da_planilha"
-$env:GOOGLE_CREDENTIALS_PATH="C:\caminho\gsa.json"
-$env:DEXPARA_XLSX_PATH="C:\Users\j.rhoden\Desktop\git\trabalho\att_status_cf_pipeline\data\DExPARA.xlsx"
-```
-
-2) Execute:
-```powershell
-python .\processoAtt.py
-```
-
 ## Saidas geradas
 - `out_status/base_status.parquet`: base historica
-- `out_status/last_run.txt`: controle do incremental
+- `out_status/last_run.txt`: registro de execucao (nao controla a janela)
 - Snapshot publicado na aba **Entregues e Barrados** do Sheets
 
 ## GitHub Actions
 Workflow: `.github/workflows/madesa_status_pipeline.yml`
 
 Triggers:
-- Agendado (08:50 UTC)
+- Agendado (09:55 UTC)
 - Manual (workflow_dispatch)
 
 Secrets necessarios:

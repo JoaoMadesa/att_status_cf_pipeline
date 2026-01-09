@@ -144,7 +144,7 @@ def iter_respostas(session, token, di, df):
         "de": dt_api(di),
         "ate": dt_api(df, True),
         "codigoOcorrencia": ALL_CODES,
-        "tipoData": "OCORRENCIA",
+        "tipoData": "CRIACAO",
     }
 
     payload, token = fetch_page(session, token, params)
