@@ -140,7 +140,7 @@ def iter_respostas(session, token, di, df):
     params = {
         "page": 0,
         "size": PAGE_SIZE,
-        "serie": "1,4",
+        "serie": "1,4,6",
         "de": dt_api(di),
         "ate": dt_api(df, True),
         "codigoOcorrencia": ALL_CODES,
