@@ -2,7 +2,7 @@ name: Madesa Status Pipeline
 
 on:
   schedule:
-    - cron: "55 9 * * *" # diariamente as 09:55 UTC (06:55 BRT)
+    - cron: "50 9 * * *" # diariamente as 09:55 UTC (06:55 BRT)
   workflow_dispatch: {}
 
 jobs:
